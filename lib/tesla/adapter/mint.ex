@@ -8,23 +8,25 @@ if Code.ensure_loaded?(Mint.HTTP) do
     Remember to add `{:mint, "~> 1.0"}` and `{:castore, "~> 0.1"}` to dependencies.
     Also, you need to recompile tesla after adding `:mint` dependency:
 
-    ```
+    ```shell
     mix deps.clean tesla
     mix deps.compile tesla
     ```
 
     ## Examples
 
-    ```
+    ```elixir
     # set globally in config/config.exs
     config :tesla, :adapter, Tesla.Adapter.Mint
     # set per module
     defmodule MyClient do
-      use Tesla
-      adapter Tesla.Adapter.Mint
+      def client do
+        Tesla.client([], Tesla.Adapter.Mint)
+      end
     end
+
     # set global custom cacertfile
-    config :tesla, Tesla.Adapter.Mint, cacert: ["path_to_cacert"]
+    config :tesla, adapter: {Tesla.Adapter.Mint, cacert: ["path_to_cacert"]}
     ```
 
     ## Adapter specific options:
@@ -40,6 +42,7 @@ if Code.ensure_loaded?(Mint.HTTP) do
     - `:original` - Original host with port, for which reused connection was open. Needed for `Tesla.Middleware.FollowRedirects`. Otherwise adapter will use connection for another open host.
     - `:close_conn` - Close connection or not after receiving full response body. Is used for reusing mint connections. Defaults to `true`.
     - `:proxy` - Proxy settings. E.g.: `{:http, "localhost", 8888, []}`, `{:http, "127.0.0.1", 8888, []}`
+    - `:transport_opts` - Keyword list of HTTP or HTTPS options passed into `:gen_tcp` or `:ssl` respectively by mint. See [mint's docs on `transport_opts`](https://hexdocs.pm/mint/Mint.HTTP.html#connect/4-transport-options).
     """
 
     @behaviour Tesla.Adapter
@@ -91,7 +94,7 @@ if Code.ensure_loaded?(Mint.HTTP) do
     defp request(env, opts) do
       request(
         format_method(env.method),
-        Tesla.build_url(env.url, env.query),
+        Tesla.build_url(env),
         env.headers,
         env.body,
         Enum.into(opts, %{})
@@ -153,6 +156,8 @@ if Code.ensure_loaded?(Mint.HTTP) do
           _ -> opts
         end
 
+      opts = Map.put_new(opts, :mode, :passive)
+
       with {:ok, conn} <-
              HTTP.connect(String.to_atom(uri.scheme), uri.host, uri.port, Enum.into(opts, [])) do
         # If there were redirects, and passed `closed_conn: false`, we need to close opened connections to these intermediate hosts.
@@ -174,8 +179,15 @@ if Code.ensure_loaded?(Mint.HTTP) do
       end
     end
 
-    defp make_request(conn, method, path, headers, body),
-      do: HTTP.request(conn, method, path, headers, body)
+    defp make_request(conn, method, path, headers, body) do
+      case HTTP.request(conn, method, path, headers, body) do
+        {:ok, conn, ref} ->
+          {:ok, conn, ref}
+
+        {:error, _conn, error} ->
+          {:error, error}
+      end
+    end
 
     defp stream_request(conn, ref, fun) do
       case next_chunk(fun) do
@@ -304,6 +316,7 @@ if Code.ensure_loaded?(Mint.HTTP) do
 
         {:error, _conn, error, _res} ->
           if opts[:close_conn], do: {:ok, _conn} = close(conn)
+          # TODO: (breaking change) fix typo in error message, "Encounter" => "Encountered"
           {:error, "Encounter Mint error #{inspect(error)}"}
 
         :unknown ->

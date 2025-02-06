@@ -12,19 +12,36 @@ defmodule Tesla.Middleware.JSON do
   mix deps.compile tesla
   ```
 
+  > #### Using built-in `JSON` from Elixir 1.18 {: .info}
+  >
+  > This middleware supports the built-in `JSON` module introduced in ELixir 1.18, but for historical
+  > reasons is it not the default. To use it, set it as the `:engine`:
+  >
+  >     {Tesla.Middleware.JSON, engine: JSON}
+  >
+  > For more advanced usage using custom encoders/decodes, provide the `:encode` and `:decode` anonymous functions instead.
+
+  If you only need to encode the request body or decode the response body,
+  you can use `Tesla.Middleware.EncodeJson` or `Tesla.Middleware.DecodeJson` directly instead.
+
   ## Examples
 
   ```
   defmodule MyClient do
-    use Tesla
-
-    plug Tesla.Middleware.JSON # use jason engine
-    # or
-    plug Tesla.Middleware.JSON, engine: JSX, engine_opts: [strict: [:comments]]
-    # or
-    plug Tesla.Middleware.JSON, engine: Poison, engine_opts: [keys: :atoms]
-    # or
-    plug Tesla.Middleware.JSON, decode: &JSX.decode/1, encode: &JSX.encode/1
+    def client do
+      Tesla.client([
+        # use jason engine
+        Tesla.Middleware.JSON,
+        # or
+        {Tesla.Middleware.JSON, engine: JSON}
+        # or
+        {Tesla.Middleware.JSON, engine: JSX, engine_opts: [strict: [:comments]]},
+        # or
+        {Tesla.Middleware.JSON, engine: Poison, engine_opts: [keys: :atoms]},
+        # or
+        {Tesla.Middleware.JSON, decode: &JSX.decode/1, encode: &JSX.encode/1}
+      ])
+    end
   end
   ```
 
@@ -33,7 +50,7 @@ defmodule Tesla.Middleware.JSON do
   - `:decode` - decoding function
   - `:encode` - encoding function
   - `:encode_content_type` - content-type to be used in request header
-  - `:engine` - encode/decode engine, e.g `Jason`, `Poison` or `JSX`  (defaults to Jason)
+  - `:engine` - encode/decode engine, e.g `JSON`, `Jason`, `Poison` or `JSX`  (defaults to Jason)
   - `:engine_opts` - optional engine options
   - `:decode_content_types` - list of additional decodable content-types
   """
@@ -61,6 +78,7 @@ defmodule Tesla.Middleware.JSON do
 
   It is used by `Tesla.Middleware.EncodeJson`.
   """
+  @spec encode(Tesla.Env.t(), keyword()) :: Tesla.Env.result()
   def encode(env, opts) do
     with true <- encodable?(env),
          {:ok, body} <- encode_body(env.body, opts) do
@@ -98,6 +116,7 @@ defmodule Tesla.Middleware.JSON do
 
   It is used by `Tesla.Middleware.DecodeJson`.
   """
+  @spec decode(Tesla.Env.t(), keyword()) :: Tesla.Env.result()
   def decode(env, opts) do
     with true <- decodable?(env, opts),
          {:ok, body} <- decode_body(env.body, opts) do
@@ -108,19 +127,41 @@ defmodule Tesla.Middleware.JSON do
     end
   end
 
+  defp decode_body(body, opts) when is_struct(body, Stream) or is_function(body),
+    do: {:ok, decode_stream(body, opts)}
+
   defp decode_body(body, opts), do: process(body, :decode, opts)
 
   defp decodable?(env, opts), do: decodable_body?(env) && decodable_content_type?(env, opts)
 
   defp decodable_body?(env) do
-    (is_binary(env.body) && env.body != "") || (is_list(env.body) && env.body != [])
+    (is_binary(env.body) && env.body != "") ||
+      (is_list(env.body) && env.body != []) ||
+      is_function(env.body) ||
+      is_struct(env.body, Stream)
   end
 
   defp decodable_content_type?(env, opts) do
     case Tesla.get_header(env, "content-type") do
-      nil -> false
-      content_type -> Enum.any?(content_types(opts), &String.starts_with?(content_type, &1))
+      nil ->
+        false
+
+      content_type ->
+        content_type = String.downcase(content_type)
+
+        opts
+        |> content_types()
+        |> Enum.any?(&String.starts_with?(content_type, &1))
     end
+  end
+
+  defp decode_stream(body, opts) do
+    Stream.map(body, fn chunk ->
+      case decode_body(chunk, opts) do
+        {:ok, item} -> item
+        _ -> chunk
+      end
+    end)
   end
 
   defp content_types(opts),
@@ -142,7 +183,14 @@ defmodule Tesla.Middleware.JSON do
     if fun = opts[op] do
       fun.(data)
     else
-      engine = Keyword.get(opts, :engine, @default_engine)
+      engine =
+        case Keyword.fetch(opts, :engine) do
+          # Special case for JSON, which doesn't have encode/2 nor return {:ok, json}
+          {:ok, JSON} -> Tesla.Middleware.JSON.JSONAdapter
+          {:ok, engine} -> engine
+          :error -> @default_engine
+        end
+
       opts = Keyword.get(opts, :engine_opts, [])
 
       apply(engine, op, [data, opts])
@@ -151,7 +199,17 @@ defmodule Tesla.Middleware.JSON do
 end
 
 defmodule Tesla.Middleware.DecodeJson do
-  @moduledoc false
+  @moduledoc """
+  Decodes response body as JSON.
+
+  Only decodes the body if the `Content-Type` header suggests
+  that the body is JSON.
+  """
+  @moduledoc since: "1.8.0"
+
+  @behaviour Tesla.Middleware
+
+  @impl Tesla.Middleware
   def call(env, next, opts) do
     opts = opts || []
 
@@ -162,7 +220,14 @@ defmodule Tesla.Middleware.DecodeJson do
 end
 
 defmodule Tesla.Middleware.EncodeJson do
-  @moduledoc false
+  @moduledoc """
+  Encodes request body as JSON.
+  """
+  @moduledoc since: "1.8.0"
+
+  @behaviour Tesla.Middleware
+
+  @impl Tesla.Middleware
   def call(env, next, opts) do
     opts = opts || []
 

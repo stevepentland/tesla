@@ -8,16 +8,10 @@ defmodule Tesla.Middleware.BearerAuth do
 
   ```
   defmodule MyClient do
-    use Tesla
-
-    # static configuration
-    plug Tesla.Middleware.BearerAuth, token: "token"
-
-    # dynamic token
     def new(token) do
-      Tesla.client [
+      Tesla.client([
         {Tesla.Middleware.BearerAuth, token: token}
-      ]
+      ])
     end
   end
   ```

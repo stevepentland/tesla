@@ -4,7 +4,7 @@ defmodule Tesla.Mock do
 
   ## Setup
 
-  ```
+  ```elixir
   # config/test.exs
   config :tesla, adapter: Tesla.Mock
 
@@ -14,7 +14,7 @@ defmodule Tesla.Mock do
 
   ## Examples
 
-  ```
+  ```elixir
   defmodule MyAppTest do
     use ExUnit.Case
 
@@ -37,7 +37,7 @@ defmodule Tesla.Mock do
 
   ## Setting up mocks
 
-  ```
+  ```elixir
   # Match on method & url and return whole Tesla.Env
   Tesla.Mock.mock(fn
     %{method: :get, url: "http://example.com/list"} ->
@@ -83,7 +83,7 @@ defmodule Tesla.Mock do
   To solve this issue it is possible to setup a global mock
   using `mock_global/1` function.
 
-  ```
+  ```elixir
   defmodule MyTest do
     use ExUnit.Case, async: false # must be false!
 
@@ -186,8 +186,8 @@ defmodule Tesla.Mock do
       import Tesla.Mock
 
       mock fn
-        %{url: "/ok"} -> text(%{"some" => "data"})
-        %{url: "/404"} -> text(%{"some" => "data"}, status: 404)
+        %{url: "/ok"} -> text("200 ok")
+        %{url: "/404"} -> text("404 not found", status: 404)
       end
   """
   @spec text(body :: term, opts :: response_opts) :: Tesla.Env.t()
@@ -226,7 +226,16 @@ defmodule Tesla.Mock do
   end
 
   defp pdict_set(fun), do: Process.put(__MODULE__, fun)
-  defp pdict_get, do: Process.get(__MODULE__)
+
+  # Gets the mock fun for the current process or its ancestors
+  defp pdict_get do
+    potential_mock_holder_pids = [self() | Enum.reverse(Process.get(:"$callers", []))]
+
+    Enum.find_value(potential_mock_holder_pids, nil, fn pid ->
+      {:dictionary, process_dictionary} = Process.info(pid, :dictionary)
+      Keyword.get(process_dictionary, __MODULE__)
+    end)
+  end
 
   defp agent_set(fun) do
     case Process.whereis(__MODULE__) do

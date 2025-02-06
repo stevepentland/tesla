@@ -1,4 +1,6 @@
 defmodule Tesla.Builder do
+  @moduledoc false
+
   @http_verbs ~w(head get delete trace options post put patch)a
   @body ~w(post put patch)a
 
@@ -33,7 +35,7 @@ defmodule Tesla.Builder do
         - `:method` - the request method, one of [`:head`, `:get`, `:delete`, `:trace`, `:options`, `:post`, `:put`, `:patch`]
         - `:url` - either full url e.g. "http://example.com/some/path" or just "/some/path" if using `Tesla.Middleware.BaseUrl`
         - `:query` - a keyword list of query params, e.g. `[page: 1, per_page: 100]`
-        - `:headers` - a keyworld list of headers, e.g. `[{"content-type", "text/plain"}]`
+        - `:headers` - a keyword list of headers, e.g. `[{"content-type", "text/plain"}]`
         - `:body` - depends on used middleware:
             - by default it can be a binary
             - if using e.g. JSON encoding middleware it can be a nested map
@@ -84,19 +86,18 @@ defmodule Tesla.Builder do
   @doc """
   Attach middleware to your API client.
 
-  ```
-  defmodule ExampleApi do
-    use Tesla
+      defmodule ExampleApi do
+        use Tesla
 
-    # plug middleware module with options
-    plug Tesla.Middleware.BaseUrl, "http://api.example.com"
+        # plug middleware module with options
+        plug Tesla.Middleware.BaseUrl, "http://api.example.com"
 
-    # or without options
-    plug Tesla.Middleware.JSON
+        # or without options
+        plug Tesla.Middleware.JSON
 
-    # or a custom middleware
-    plug MyProject.CustomMiddleware
-  end
+        # or a custom middleware
+        plug MyProject.CustomMiddleware
+      end
   """
 
   defmacro plug(middleware, opts) do
@@ -120,19 +121,18 @@ defmodule Tesla.Builder do
   @doc """
   Choose adapter for your API client.
 
-  ```
-  defmodule ExampleApi do
-    use Tesla
+      defmodule ExampleApi do
+        use Tesla
 
-    # set adapter as module
-    adapter Tesla.Adapter.Hackney
+        # set adapter as module
+        adapter Tesla.Adapter.Hackney
 
-    # set adapter as anonymous function
-    adapter fn env ->
-      ...
-      env
-    end
-  end
+        # set adapter as anonymous function
+        adapter fn env ->
+          ...
+          env
+        end
+      end
   """
   defmacro adapter(name, opts) do
     quote do
@@ -214,7 +214,7 @@ defmodule Tesla.Builder do
       for bang <- [:safe, :bang],
           client <- [:client, :noclient],
           opts <- [:opts, :noopts],
-          method in only && not (method in except) do
+          method in only && method not in except do
         gen(method, bang, client, opts, docs)
       end
     end

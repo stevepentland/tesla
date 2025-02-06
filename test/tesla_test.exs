@@ -4,7 +4,8 @@ defmodule TeslaTest do
 
   require Tesla
 
-  @url "http://localhost:#{Application.get_env(:httparrot, :http_port)}"
+  @url "http://localhost:#{Application.compile_env(:httparrot, :http_port)}"
+  @api_url "http://api.example.com"
 
   describe "Adapters" do
     defmodule ModuleAdapter do
@@ -49,7 +50,7 @@ defmodule TeslaTest do
       :ok
     end
 
-    test "defauilt adapter" do
+    test "default adapter" do
       assert Tesla.effective_adapter(EmptyClient) == {Tesla.Adapter.Httpc, :call, [[]]}
     end
 
@@ -61,6 +62,11 @@ defmodule TeslaTest do
     test "prefer config over module setting" do
       Application.put_env(:tesla, ModuleAdapterClient, adapter: Tesla.Mock)
       assert Tesla.effective_adapter(ModuleAdapterClient) == {Tesla.Mock, :call, [[]]}
+    end
+
+    test "ensure adapter is set" do
+      assert {:ok, response} = ModuleAdapterClient.request(url: "test")
+      assert response.__client__.adapter
     end
 
     test "execute module adapter" do
@@ -275,38 +281,38 @@ defmodule TeslaTest do
   end
 
   describe "build_url/2" do
-    setup do
-      {:ok, url: "http://api.example.com"}
-    end
-
-    test "returns URL with query params from keyword list", %{url: url} do
+    test "returns URL with query params from keyword list" do
       query_params = [user: 3, page: 2]
-      assert build_url(url, query_params) === url <> "?user=3&page=2"
+      assert build_url(@api_url, query_params) == @api_url <> "?user=3&page=2"
     end
 
-    test "returns URL with query params from nested keyword list", %{url: url} do
+    test "returns URL with query params from nested keyword list" do
       query_params = [nested: [more_nested: [argument: 1]]]
-      assert build_url(url, query_params) === url <> "?nested%5Bmore_nested%5D%5Bargument%5D=1"
+
+      assert build_url(@api_url, query_params) ==
+               @api_url <> "?nested%5Bmore_nested%5D%5Bargument%5D=1"
     end
 
-    test "returns URL with query params from tuple list", %{url: url} do
+    test "returns URL with query params from tuple list" do
       query_params = [{"user", 3}, {"page", 2}]
-      assert build_url(url, query_params) === url <> "?user=3&page=2"
+      assert build_url(@api_url, query_params) == @api_url <> "?user=3&page=2"
     end
 
-    test "returns URL with query params from nested tuple list", %{url: url} do
+    test "returns URL with query params from nested tuple list" do
       query_params = [{"nested", [{"more_nested", [{"argument", 1}]}]}]
-      assert build_url(url, query_params) === url <> "?nested%5Bmore_nested%5D%5Bargument%5D=1"
+
+      assert build_url(@api_url, query_params) ==
+               @api_url <> "?nested%5Bmore_nested%5D%5Bargument%5D=1"
     end
 
-    test "returns URL with new query params concated from keyword list", %{url: url} do
-      url_with_param = url <> "?user=4"
+    test "returns URL with new query params concated from keyword list" do
+      url_with_param = @api_url <> "?user=4"
       query_params = [page: 2, status: true]
-      assert build_url(url_with_param, query_params) === url <> "?user=4&page=2&status=true"
+      assert build_url(url_with_param, query_params) == @api_url <> "?user=4&page=2&status=true"
     end
 
-    test "returns normal URL when query list is empty", %{url: url} do
-      assert build_url(url, []) == url
+    test "returns normal URL when query list is empty" do
+      assert build_url(@api_url, []) == @api_url
     end
 
     test "returns error when passing wrong params" do
@@ -316,6 +322,31 @@ defmodule TeslaTest do
       assert_raise FunctionClauseError, fn ->
         build_url(wrong_url, wrong_query)
       end
+    end
+  end
+
+  describe "build_url/3" do
+    test "encoding www_form" do
+      query_params = [name: "foo bar", page: 2]
+      assert build_url(@api_url, query_params, :www_form) == @api_url <> "?name=foo+bar&page=2"
+      assert build_url(@api_url, query_params, :www_form) == build_url(@api_url, query_params)
+    end
+
+    test "encoding rfc3986" do
+      query_params = [name: "foo bar", page: 2]
+      assert build_url(@api_url, query_params, :rfc3986) == @api_url <> "?name=foo%20bar&page=2"
+    end
+
+    test "default encoding www_form" do
+      query_params = [name: "foo bar", page: 2]
+      assert build_url(@api_url, query_params, :www_form) == build_url(@api_url, query_params)
+    end
+  end
+
+  describe "build_url/1" do
+    test "returns URL with query params from Tesla.Env struct" do
+      env = %Tesla.Env{url: @api_url, query: [user: 3, page: 2]}
+      assert Tesla.build_url(env) == @api_url <> "?user=3&page=2"
     end
   end
 end

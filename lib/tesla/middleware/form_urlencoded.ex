@@ -3,7 +3,7 @@ defmodule Tesla.Middleware.FormUrlencoded do
   Send request body as `application/x-www-form-urlencoded`.
 
   Performs encoding of `body` from a `Map` such as `%{"foo" => "bar"}` into
-  url encoded data.
+  URL-encoded data.
 
   Performs decoding of the response into a map when urlencoded and content-type
   is `application/x-www-form-urlencoded`, so `"foo=bar"` becomes
@@ -11,14 +11,19 @@ defmodule Tesla.Middleware.FormUrlencoded do
 
   ## Examples
 
-  ```
+  ```elixir
   defmodule Myclient do
-    use Tesla
-
-    plug Tesla.Middleware.FormUrlencoded
+    def client do
+      Tesla.client([
+        {Tesla.Middleware.FormUrlencoded,
+          encode: &Plug.Conn.Query.encode/1,
+          decode: &Plug.Conn.Query.decode/1}
+      ])
+    end
   end
 
-  Myclient.post("/url", %{key: :value})
+  client = Myclient.client()
+  Myclient.post(client, "/url", %{key: :value})
   ```
 
   ## Options
@@ -33,16 +38,19 @@ defmodule Tesla.Middleware.FormUrlencoded do
   Support for this specific case is obtained by configuring the middleware to
   encode (and decode) with `Plug.Conn.Query`
 
-  ```
+  ```elixir
   defmodule Myclient do
-    use Tesla
-
-    plug Tesla.Middleware.FormUrlencoded,
-      encode: &Plug.Conn.Query.encode/1,
-      decode: &Plug.Conn.Query.decode/1
+    def client do
+      Tesla.client([
+        {Tesla.Middleware.FormUrlencoded,
+          encode: &Plug.Conn.Query.encode/1,
+          decode: &Plug.Conn.Query.decode/1}
+      ])
+    end
   end
 
-  Myclient.post("/url", %{key: %{nested: "value"}})
+  client = Myclient.client()
+  Myclient.post(client, "/url", %{key: %{nested: "value"}})
   ```
   """
 

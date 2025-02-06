@@ -5,11 +5,11 @@ if Code.ensure_loaded?(:telemetry) do
 
     ## Examples
 
-    ```
+    ```elixir
     defmodule MyClient do
-      use Tesla
-
-      plug Tesla.Middleware.Telemetry
+      def client do
+        Tesla.client([Tesla.Middleware.Telemetry])
+      end
     end
 
     :telemetry.attach(
@@ -46,24 +46,26 @@ if Code.ensure_loaded?(:telemetry) do
           This event can be disabled by setting `config :tesla, Tesla.Middleware.Telemetry, disable_legacy_event: true` in your config.
           Be sure to run `mix deps.compile --force tesla` after changing this setting to ensure the change is picked up.
 
-    Please check the [telemetry](https://hexdocs.pm/telemetry/) for the further usage.
+    Please check the [telemetry](https://hexdocs.pm/telemetry/) for further usage.
 
     ## URL event scoping with `Tesla.Middleware.PathParams` and `Tesla.Middleware.KeepRequest`
 
-    Sometimes, it is useful to have access to a template url (i.e. `"/users/:user_id"`) for grouping
+    Sometimes, it is useful to have access to a template URL (i.e. `"/users/:user_id"`) for grouping
     Telemetry events. For such cases, a combination of the `Tesla.Middleware.PathParams`,
     `Tesla.Middleware.Telemetry` and `Tesla.Middleware.KeepRequest` may be used.
 
-    ```
+    ```elixir
     defmodule MyClient do
-      use Tesla
-
-      # The KeepRequest middleware sets the template url as a Tesla.Env.opts entry
-      # Said entry must be used because on happy-path scenarios,
-      # the Telemetry middleware will receive the Tesla.Env.url resolved by PathParams.
-      plug Tesla.Middleware.KeepRequest
-      plug Tesla.Middleware.Telemetry
-      plug Tesla.Middleware.PathParams
+      def client do
+        Tesla.client([
+          # The KeepRequest middleware sets the template URL as a Tesla.Env.opts entry
+          # Said entry must be used because on happy-path scenarios,
+          # the Telemetry middleware will receive the Tesla.Env.url resolved by PathParams.
+          Tesla.Middleware.KeepRequest,
+          Tesla.Middleware.PathParams,
+          Tesla.Middleware.Telemetry
+        ])
+      end
     end
 
     :telemetry.attach(
@@ -72,17 +74,27 @@ if Code.ensure_loaded?(:telemetry) do
       fn event, measurements, meta, config ->
         path_params_template_url = meta.env.opts[:req_url]
         # The meta.env.url key will only present the resolved URL on happy-path scenarios.
-        # Error cases will still return the original template url.
+        # Error cases will still return the original template URL.
         path_params_resolved_url = meta.env.url
       end,
       nil
     )
     ```
+
+    > #### Order Matters {: .warning}
+    > Place the `Tesla.Middleware.Telemetry` middleware as close as possible to
+    > the end of the middleware stack to ensure that you are measuring the
+    > actual request itself and do not lose any information about the
+    > `t:Tesla.Env.t/0` due to some transformation that happens in the
+    > middleware stack before reaching the `Tesla.Middleware.Telemetry`
+    > middleware.
     """
 
-    @disable_legacy_event Application.get_env(:tesla, Tesla.Middleware.Telemetry,
-                            disable_legacy_event: false
-                          )[:disable_legacy_event]
+    @disable_legacy_event Application.compile_env(
+                            :tesla,
+                            [Tesla.Middleware.Telemetry, :disable_legacy_event],
+                            false
+                          )
 
     @behaviour Tesla.Middleware
 
@@ -142,7 +154,7 @@ if Code.ensure_loaded?(:telemetry) do
     end
 
     if @disable_legacy_event do
-      defp emit_legacy_event(duration, result) do
+      defp emit_legacy_event(_duration, _result) do
         :ok
       end
     else

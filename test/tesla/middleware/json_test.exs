@@ -10,6 +10,10 @@ defmodule Tesla.Middleware.JsonTest do
       adapter fn env ->
         {status, headers, body} =
           case env.url do
+            # GET https://testlajson.free.beeceptor.com/todos to see the response
+            "/uppercased-content-type" ->
+              {200, [{"content-type", "application/JSON"}], "{\"value\": 123}"}
+
             "/decode" ->
               {200, [{"content-type", "application/json"}], "{\"value\": 123}"}
 
@@ -46,6 +50,11 @@ defmodule Tesla.Middleware.JsonTest do
 
         {:ok, %{env | status: status, headers: headers, body: body}}
       end
+    end
+
+    test "decoding json with insensitive content type" do
+      assert {:ok, env} = Client.get("/uppercased-content-type")
+      assert env.body == %{"value" => 123}
     end
 
     test "decode JSON body" do
@@ -103,7 +112,7 @@ defmodule Tesla.Middleware.JsonTest do
       assert {:error, {Tesla.Middleware.JSON, :decode, _}} = Client.get("/invalid-json-format")
     end
 
-    test "raise error when decoding non-utf8 json" do
+    test "return error when decoding non-utf8 json" do
       assert {:error, {Tesla.Middleware.JSON, :decode, _}} = Client.get("/invalid-json-encoding")
     end
   end
@@ -164,6 +173,32 @@ defmodule Tesla.Middleware.JsonTest do
     test "EncodeJson / DecodeJson work without options" do
       assert {:ok, env} = EncodeDecodeJsonClient.post("/foo2baz", %{"foo" => "bar"})
       assert env.body == %{"baz" => "bar"}
+    end
+  end
+
+  describe "Streams" do
+    test "encode stream" do
+      adapter = fn env ->
+        assert IO.iodata_to_binary(Enum.to_list(env.body)) == ~s|{"id":1}\n{"id":2}\n{"id":3}\n|
+      end
+
+      stream = Stream.map(1..3, fn i -> %{id: i} end)
+      Tesla.Middleware.JSON.call(%Tesla.Env{body: stream}, [{:fn, adapter}], [])
+    end
+
+    test "decode stream" do
+      adapter = fn _env ->
+        stream = Stream.map(1..3, fn i -> ~s|{"id": #{i}}\n| end)
+
+        {:ok,
+         %Tesla.Env{
+           headers: [{"content-type", "application/json"}],
+           body: stream
+         }}
+      end
+
+      assert {:ok, env} = Tesla.Middleware.JSON.call(%Tesla.Env{}, [{:fn, adapter}], [])
+      assert Enum.to_list(env.body) == [%{"id" => 1}, %{"id" => 2}, %{"id" => 3}]
     end
   end
 
@@ -262,6 +297,54 @@ defmodule Tesla.Middleware.JsonTest do
     test "decode with custom engine options" do
       assert {:ok, env} = JsxClient.get("/decode")
       assert env.body == %{"value" => 123}
+    end
+  end
+
+  if Code.ensure_loaded?(JSON) do
+    describe "Engine: JSON" do
+      defmodule JSONClient do
+        use Tesla
+
+        plug Tesla.Middleware.JSON, engine: JSON
+
+        adapter fn env ->
+          assert env.body == ~S({"hello":"world"})
+
+          {:ok,
+           %{
+             env
+             | status: 200,
+               headers: [{"content-type", "application/json"}],
+               body: ~s|{"value": 123}|
+           }}
+        end
+      end
+
+      test "encodes/decodes as expected" do
+        assert {:ok, env} = JSONClient.post("/json", %{hello: "world"})
+        assert env.body == %{"value" => 123}
+      end
+
+      defmodule Decoder do
+        use Tesla
+
+        plug Tesla.Middleware.DecodeJson, engine: JSON
+
+        adapter fn env ->
+          {:ok,
+           %{
+             env
+             | status: 200,
+               headers: [{"content-type", "application/json"}],
+               body: ~s|{"value": 123}|
+           }}
+        end
+      end
+
+      test "decodes as expected" do
+        assert {:ok, env} = Decoder.get("/json")
+        assert env.body == %{"value" => 123}
+      end
     end
   end
 end

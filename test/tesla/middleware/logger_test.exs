@@ -4,7 +4,7 @@ defmodule Tesla.Middleware.LoggerTest do
   defmodule Client do
     use Tesla
 
-    plug Tesla.Middleware.Logger
+    plug Tesla.Middleware.Logger, format: "$query $url -> $status"
 
     adapter fn env ->
       env = Tesla.put_header(env, "content-type", "text/plain")
@@ -60,6 +60,20 @@ defmodule Tesla.Middleware.LoggerTest do
     test "ok" do
       log = capture_log(fn -> Client.get("/ok") end)
       assert log =~ "/ok -> 200"
+    end
+
+    test "default encoding strategy www_form" do
+      log = capture_log(fn -> Client.get("/ok", query: [test: "foo bar"]) end)
+      assert log =~ "test=foo+bar"
+    end
+
+    test "encodes with specified strategy" do
+      log =
+        capture_log(fn ->
+          Client.get("/ok", query: %{"test" => "foo bar"}, opts: [query_encoding: :rfc3986])
+        end)
+
+      assert log =~ "test=foo%20bar"
     end
   end
 
@@ -222,7 +236,7 @@ defmodule Tesla.Middleware.LoggerTest do
       assert is_list(Formatter.compile(nil))
     end
 
-    test "compile with funtion" do
+    test "compile with function" do
       assert Formatter.compile(&CompileMod.format/3) == (&CompileMod.format/3)
     end
 
@@ -281,7 +295,7 @@ defmodule Tesla.Middleware.LoggerTest do
                "GET /get page=1&sort=desc&status%5B%5D=a&status%5B%5D=b&status%5B%5D=c&user%5Bname%5D=Jon&user%5Bage%5D=20 -> 201 | 200.000"
     end
 
-    test "format with funtion" do
+    test "format with function" do
       assert Formatter.format(nil, nil, nil, &CompileMod.format/3) == "message"
     end
 

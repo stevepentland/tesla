@@ -1,303 +1,60 @@
-defmodule Tesla.Error do
-  defexception env: nil, stack: [], reason: nil
-
-  def message(%Tesla.Error{env: %{url: url, method: method}, reason: reason}) do
-    "#{inspect(reason)} (#{method |> to_string |> String.upcase()} #{url})"
-  end
-end
-
-defmodule Tesla.Env do
-  @moduledoc """
-  This module defines a `t:Tesla.Env.t/0` struct that stores all data related to request/response.
-
-  ## Fields
-
-  - `:method` - method of request. Example: `:get`
-  - `:url` - request url. Example: `"https://www.google.com"`
-  - `:query` - list of query params.
-    Example: `[{"param", "value"}]` will be translated to `?params=value`.
-    Note: query params passed in url (e.g. `"/get?param=value"`) are not parsed to `query` field.
-  - `:headers` - list of request/response headers.
-    Example: `[{"content-type", "application/json"}]`.
-    Note: request headers are overridden by response headers when adapter is called.
-  - `:body` - request/response body.
-    Note: request body is overridden by response body when adapter is called.
-  - `:status` - response status. Example: `200`
-  - `:opts` - list of options. Example: `[adapter: [recv_timeout: 30_000]]`
-  """
-
-  @type client :: Tesla.Client.t()
-  @type method :: :head | :get | :delete | :trace | :options | :post | :put | :patch
-  @type url :: binary
-  @type param :: binary | [{binary | atom, param}]
-  @type query :: [{binary | atom, param}]
-  @type headers :: [{binary, binary}]
-
-  @type body :: any
-  @type status :: integer | nil
-  @type opts :: keyword
-
-  @type runtime :: {atom, atom, any} | {atom, atom} | {:fn, (t -> t)} | {:fn, (t, stack -> t)}
-  @type stack :: [runtime]
-  @type result :: {:ok, t()} | {:error, any}
-
-  @type t :: %__MODULE__{
-          method: method,
-          query: query,
-          url: url,
-          headers: headers,
-          body: body,
-          status: status,
-          opts: opts,
-          __module__: atom,
-          __client__: client
-        }
-
-  defstruct method: nil,
-            url: "",
-            query: [],
-            headers: [],
-            body: nil,
-            status: nil,
-            opts: [],
-            __module__: nil,
-            __client__: nil
-end
-
-defmodule Tesla.Middleware do
-  @moduledoc """
-  The middleware specification.
-
-  Middleware is an extension of basic `Tesla` functionality. It is a module that must
-  implement `c:Tesla.Middleware.call/3`.
-
-  ## Middleware options
-
-  Options can be passed to middleware in second param of `Tesla.Builder.plug/2` macro:
-
-      plug Tesla.Middleware.BaseUrl, "https://example.com"
-
-  or inside tuple in case of dynamic middleware (`Tesla.client/1`):
-
-      Tesla.client([{Tesla.Middleware.BaseUrl, "https://example.com"}])
-
-  ## Writing custom middleware
-
-  Writing custom middleware is as simple as creating a module implementing `c:Tesla.Middleware.call/3`.
-
-  See `c:Tesla.Middleware.call/3` for details.
-
-  ### Examples
-
-      defmodule MyProject.InspectHeadersMiddleware do
-        @behaviour Tesla.Middleware
-
-        @impl Tesla.Middleware
-        def call(env, next, options) do
-          env
-          |> inspect_headers(options)
-          |> Tesla.run(next)
-          |> inspect_headers(options)
-        end
-
-        defp inspect_headers(env, options) do
-          IO.inspect(env.headers, options)
-        end
-      end
-
-  """
-
-  @doc """
-  Invoked when a request runs.
-
-  - (optionally) read and/or writes request data
-  - calls `Tesla.run/2`
-  - (optionally) read and/or writes response data
-
-  ## Arguments
-
-  - `env` - `Tesla.Env` struct that stores request/response data
-  - `next` - middlewares that should be called after current one
-  - `options` - middleware options provided by user
-  """
-  @callback call(env :: Tesla.Env.t(), next :: Tesla.Env.stack(), options :: any) ::
-              Tesla.Env.result()
-end
-
-defmodule Tesla.Adapter do
-  @moduledoc """
-  The adapter specification.
-
-  Adapter is a module that denormalize request data stored in `Tesla.Env` in order to make
-  request with lower level http client (e.g. `:httpc` or `:hackney`) and normalize response data
-  in order to store it back to `Tesla.Env`. It has to implement `c:Tesla.Adapter.call/2`.
-
-  ## Writing custom adapter
-
-  Create a module implementing `c:Tesla.Adapter.call/2`.
-
-  See `c:Tesla.Adapter.call/2` for details.
-
-  ### Examples
-
-      defmodule MyProject.CustomAdapter do
-        alias Tesla.Multipart
-
-        @behaviour Tesla.Adapter
-
-        @override_defaults [follow_redirect: false]
-
-        @impl Tesla.Adapter
-        def call(env, opts) do
-          opts = Tesla.Adapter.opts(@override_defaults, env, opts)
-
-          with {:ok, {status, headers, body}} <- request(env.method, env.body, env.headers, opts) do
-            {:ok, normalize_response(env, status, headers, body)}
-          end
-        end
-
-        defp request(_method, %Stream{}, _headers, _opts) do
-          {:error, "stream not supported by adapter"}
-        end
-
-        defp request(_method, %Multipart{}, _headers, _opts) do
-          {:error, "multipart not supported by adapter"}
-        end
-
-        defp request(method, body, headers, opts) do
-          :lower_level_http.request(method, body, denormalize_headers(headers), opts)
-        end
-
-        defp denormalize_headers(headers), do: ...
-        defp normalize_response(env, status, headers, body), do: %Tesla.Env{env | ...}
-      end
-
-  """
-
-  @doc """
-  Invoked when a request runs.
-
-  ## Arguments
-
-  - `env` - `Tesla.Env` struct that stores request/response data
-  - `options` - middleware options provided by user
-  """
-  @callback call(env :: Tesla.Env.t(), options :: any) :: Tesla.Env.result()
-
-  @doc """
-  Helper function that merges all adapter options.
-
-  ## Arguments
-
-  - `defaults` (optional) - useful to override lower level http client default configuration
-  - `env` - `Tesla.Env` struct
-  - `opts` - options provided to `Tesla.Builder.adapter/2` macro
-
-  ## Precedence rules
-
-  - config from `opts` overrides config from `defaults` when same key is encountered
-  - config from `env` overrides config from both `defaults` and `opts` when same key is encountered
-  """
-  @spec opts(Keyword.t(), Tesla.Env.t(), Keyword.t()) :: Keyword.t()
-  def opts(defaults \\ [], env, opts) do
-    defaults
-    |> Keyword.merge(opts || [])
-    |> Keyword.merge(env.opts[:adapter] || [])
-  end
-end
-
 defmodule Tesla do
+  @moduledoc """
+  A HTTP toolkit for building API clients using middlewares.
+
+  ## Building API client
+
+  Use `Tesla.client/2` to build a client with the given middleware and adapter.
+
+  ### Examples
+
+  ```elixir
+  defmodule ExampleApi do
+    def client do
+      Tesla.client([
+        {Tesla.Middleware.BaseUrl, "http://api.example.com"},
+        Tesla.Middleware.JSON
+      ])
+    end
+
+    def fetch_data(client) do
+      Tesla.get(client, "/data")
+    end
+  end
+  ```
+
+  Now you can use `ExampleApi.client/0` to make requests to the API.
+
+  ```elixir
+  client = ExampleApi.client()
+  ExampleApi.fetch_data(client)
+  ```
+
+  ## Direct usage
+
+  It is also possible to do request directly with `Tesla` module.
+
+  ```elixir
+  Tesla.get("https://example.com")
+  ```
+
+  ## Default adapter
+
+  By default `Tesla` is using `Tesla.Adapter.Httpc`, because `:httpc` is
+  included in Erlang/OTP and does not require installation of any additional
+  dependency. It can be changed globally with config:
+
+  ```elixir
+  config :tesla, :adapter, Tesla.Adapter.Mint
+  ```
+  """
+
   use Tesla.Builder
 
   alias Tesla.Env
 
   require Tesla.Adapter.Httpc
   @default_adapter Tesla.Adapter.Httpc
-
-  @moduledoc """
-  A HTTP toolkit for building API clients using middlewares.
-
-  ## Building API client
-
-  `use Tesla` macro will generate basic HTTP functions (e.g. `get/3`, `post/4`, etc.) inside your module.
-
-  It supports following options:
-
-  - `:only` - builder will generate only functions included in the given list
-  - `:except` - builder will not generate the functions that are listed in the options
-  - `:docs` - when set to false builder will not add documentation to generated functions
-
-  ### Examples
-
-      defmodule ExampleApi do
-        use Tesla, only: [:get], docs: false
-
-        plug Tesla.Middleware.BaseUrl, "http://api.example.com"
-        plug Tesla.Middleware.JSON
-
-        def fetch_data do
-          get("/data")
-        end
-      end
-
-  In example above `ExampleApi.fetch_data/0` is equivalent of `ExampleApi.get("/data")`.
-
-      defmodule ExampleApi do
-        use Tesla, except: [:post, :delete]
-
-        plug Tesla.Middleware.BaseUrl, "http://api.example.com"
-        plug Tesla.Middleware.JSON
-
-        def fetch_data do
-          get("/data")
-        end
-      end
-
-  In example above `except: [:post, :delete]` will make sure that post functions will not be generated for this module.
-
-  ## Direct usage
-
-  It is also possible to do request directly with `Tesla` module.
-
-      Tesla.get("https://example.com")
-
-  ### Common pitfalls
-
-  Direct usage won't include any middlewares.
-
-  In following example:
-
-      defmodule ExampleApi do
-        use Tesla, only: [:get], docs: false
-
-        plug Tesla.Middleware.BaseUrl, "http://api.example.com"
-        plug Tesla.Middleware.JSON
-
-        def fetch_data do
-          Tesla.get("/data")
-        end
-      end
-
-  call to `ExampleApi.fetch_data/0` will fail, because request will be missing base URL.
-
-  ## Default adapter
-
-  By default `Tesla` is using `Tesla.Adapter.Httpc`, because `:httpc` is included in Erlang/OTP and
-  does not require installation of any additional dependency. It can be changed globally with config:
-
-      config :tesla, :adapter, Tesla.Adapter.Hackney
-
-  or by `Tesla.Builder.adapter/2` macro for given API client module:
-
-      defmodule ExampleApi do
-        use Tesla
-
-        adapter Tesla.Adapter.Hackney
-
-        ...
-      end
-
-  """
 
   defmacro __using__(opts \\ []) do
     quote do
@@ -322,8 +79,9 @@ defmodule Tesla do
   end
 
   defp prepare(module, %{pre: pre, post: post} = client, options) do
-    env = struct(Env, options ++ [__module__: module, __client__: client])
-    stack = pre ++ module.__middleware__ ++ post ++ [effective_adapter(module, client)]
+    adapter = effective_adapter(module, client)
+    env = struct(Env, options ++ [__module__: module, __client__: %{client | adapter: adapter}])
+    stack = pre ++ module.__middleware__() ++ post ++ [adapter]
     {env, stack}
   end
 
@@ -346,7 +104,7 @@ defmodule Tesla do
   end
 
   defp adapter_per_module(module) do
-    module.__adapter__
+    module.__adapter__()
   end
 
   defp adapter_from_config do
@@ -365,7 +123,9 @@ defmodule Tesla do
     apply(@default_adapter, :call, [env, opts])
   end
 
-  # empty stack case is useful for reusing/testing middlewares (just pass [] as next)
+  @spec run(Env.t(), Env.stack()) :: Env.result()
+  # NOTE: keep this empty stack case is useful for reusing/testing middlewares
+  # (just pass [] as next)
   def run(env, []), do: {:ok, env}
 
   # last item in stack is adapter - skip passing rest of stack
@@ -379,7 +139,7 @@ defmodule Tesla do
   @doc """
   Adds given key/value pair to `:opts` field in `Tesla.Env`.
 
-  Useful when there's need to store additional middleware data in `Tesla.Env`
+  Useful when there's a need to store additional middleware data in `Tesla.Env`
 
   ## Examples
 
@@ -461,8 +221,6 @@ defmodule Tesla do
 
   # complete module example
   defmodule MyApi do
-    # note there is no need for `use Tesla`
-
     @middleware [
       {Tesla.Middleware.BaseUrl, "https://example.com"},
       Tesla.Middleware.JSON,
@@ -495,7 +253,7 @@ defmodule Tesla do
   MyApi.get_something(client, 42)
   ```
   """
-  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "1.2.0")
+  @doc since: "1.2.0"
   @spec client([Tesla.Client.middleware()], Tesla.Client.adapter()) :: Tesla.Client.t()
   def client(middleware, adapter \\ nil), do: Tesla.Builder.client(middleware, [], adapter)
 
@@ -505,34 +263,68 @@ defmodule Tesla do
   @deprecated "Use client/1 or client/2 instead"
   def build_adapter(fun), do: Tesla.Builder.client([], [], fun)
 
-  @doc """
-  Builds URL with the given query params.
+  @type encoding_strategy :: :rfc3986 | :www_form
 
-  Useful when you need to create an URL with dynamic query params from a Keyword list
+  @doc """
+  Builds URL with the given URL and query params.
+
+  Useful when you need to create a URL with dynamic query params from a Keyword
+  list
+
+  Allows to specify the `encoding` strategy to be one either `:www_form` or
+  `:rfc3986`. Read more about encoding at `URI.encode_query/2`.
+
+  - `url` - the base URL to which the query params will be appended.
+  - `query` - a list of key-value pairs to be encoded as query params.
+  - `encoding` - the encoding strategy to use. Defaults to `:www_form`
 
   ## Examples
 
-      iex> Tesla.build_url("http://api.example.com", [user: 3, page: 2])
-      "http://api.example.com?user=3&page=2"
+      iex> Tesla.build_url("https://api.example.com", [user: 3, page: 2])
+      "https://api.example.com?user=3&page=2"
 
-      # URL that already contains query params
-      iex> url = "http://api.example.com?user=3"
+  URL that already contains query params:
+
+      iex> url = "https://api.example.com?user=3"
       iex> Tesla.build_url(url, [page: 2, status: true])
-      "http://api.example.com?user=3&page=2&status=true"
+      "https://api.example.com?user=3&page=2&status=true"
 
+  Default encoding `:www_form`:
+
+      iex> Tesla.build_url("https://api.example.com", [user_name: "John Smith"])
+      "https://api.example.com?user_name=John+Smith"
+
+  Specified encoding strategy `:rfc3986`:
+
+      iex> Tesla.build_url("https://api.example.com", [user_name: "John Smith"], :rfc3986)
+      "https://api.example.com?user_name=John%20Smith"
   """
-  @spec build_url(Tesla.Env.url(), Tesla.Env.query()) :: binary
-  def build_url(url, []), do: url
+  @spec build_url(Tesla.Env.url(), Tesla.Env.query(), encoding_strategy) :: binary
+  def build_url(url, query, encoding \\ :www_form)
 
-  def build_url(url, query) do
+  def build_url(url, [], _encoding), do: url
+
+  def build_url(url, query, encoding) do
     join = if String.contains?(url, "?"), do: "&", else: "?"
-    url <> join <> encode_query(query)
+    url <> join <> encode_query(query, encoding)
   end
 
-  def encode_query(query) do
+  @doc """
+  Builds a URL from the given `t:Tesla.Env.t/0` struct.
+
+  Combines the `url` and `query` fields, and allows specifying the `encoding`
+  strategy before calling `build_url/3`.
+  """
+  @spec build_url(Tesla.Env.t()) :: String.t()
+  def build_url(%Tesla.Env{} = env) do
+    query_encoding = Keyword.get(env.opts, :query_encoding, :www_form)
+    Tesla.build_url(env.url, env.query, query_encoding)
+  end
+
+  def encode_query(query, encoding \\ :www_form) do
     query
     |> Enum.flat_map(&encode_pair/1)
-    |> URI.encode_query()
+    |> URI.encode_query(encoding)
   end
 
   @doc false

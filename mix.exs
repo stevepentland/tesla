@@ -1,8 +1,8 @@
 defmodule Tesla.Mixfile do
   use Mix.Project
 
-  @source_url "https://github.com/teamon/tesla"
-  @version "1.4.4"
+  @source_url "https://github.com/elixir-tesla/tesla"
+  @version "1.14.0"
 
   def project do
     [
@@ -10,7 +10,7 @@ defmodule Tesla.Mixfile do
       version: @version,
       description: description(),
       package: package(),
-      elixir: "~> 1.7",
+      elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       lockfile: lockfile(System.get_env("LOCKFILE")),
@@ -18,15 +18,13 @@ defmodule Tesla.Mixfile do
       dialyzer: [
         plt_core_path: "_build/#{Mix.env()}",
         plt_add_apps: [:mix, :inets, :idna, :ssl_verify_fun, :ex_unit],
-        plt_add_deps: :project
+        plt_add_deps: :apps_direct
       ],
-      docs: docs()
+      docs: docs(),
+      preferred_cli_env: [coveralls: :test, "coveralls.html": :test]
     ]
   end
 
-  # Configuration for the OTP application
-  #
-  # Type `mix help compile.app` for more information
   def application do
     [extra_applications: [:logger, :ssl, :inets]]
   end
@@ -39,11 +37,13 @@ defmodule Tesla.Mixfile do
     [
       maintainers: ["Tymon Tobolski"],
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/teamon/tesla"}
+      links: %{
+        "GitHub" => @source_url,
+        "Changelog" => "#{@source_url}/blob/master/CHANGELOG.md"
+      }
     ]
   end
 
-  # Specifies which paths to compile per environment.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
@@ -55,11 +55,11 @@ defmodule Tesla.Mixfile do
       {:mime, "~> 1.0 or ~> 2.0"},
 
       # http clients
-      {:ibrowse, "4.4.0", optional: true},
+      {:ibrowse, "4.4.2", optional: true},
       {:hackney, "~> 1.6", optional: true},
-      {:gun, "~> 1.3", optional: true},
-      {:finch, "~> 0.3", optional: true},
-      {:castore, "~> 0.1", optional: true},
+      {:gun, ">= 1.0.0", optional: true},
+      {:finch, "~> 0.13", optional: true},
+      {:castore, "~> 0.1 or ~> 1.0", optional: true},
       {:mint, "~> 1.0", optional: true},
 
       # json parsers
@@ -67,21 +67,26 @@ defmodule Tesla.Mixfile do
       {:poison, ">= 1.0.0", optional: true},
       {:exjsx, ">= 3.0.0", optional: true},
 
+      # messagepack parsers
+      {:msgpax, "~> 2.3", optional: true},
+
       # other
       {:fuse, "~> 2.4", optional: true},
       {:telemetry, "~> 0.4 or ~> 1.0", optional: true},
+      {:mox, "~> 1.0", optional: true},
 
-      # testing & docs
-      {:excoveralls, "~> 0.8", only: :test},
-      {:httparrot, "~> 1.3", only: :test},
-      {:ex_doc, "~> 0.21", only: :dev, runtime: false},
-      {:mix_test_watch, "~> 1.0", only: :dev},
-      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:inch_ex, "~> 2.0", only: :docs},
+      # devtools
+      {:opentelemetry_process_propagator, ">= 0.0.0", only: [:test, :dev]},
+      {:excoveralls, ">= 0.0.0", only: :test, runtime: false},
+      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
+      {:mix_test_watch, ">= 0.0.0", only: :dev},
+      {:dialyxir, ">= 0.0.0", only: [:dev, :test], runtime: false},
+      {:inch_ex, ">= 0.0.0", only: :docs},
 
-      # override httparrot dependencies
-      {:cowlib, "~> 2.9", only: :test, override: true},
-      {:ranch, "~> 1.8", only: :test, override: true}
+      # httparrot dependencies
+      {:httparrot, "~> 1.4", only: :test},
+      {:cowlib, "~> 2.9", only: [:dev, :test], override: true},
+      {:ranch, "~> 2.1", only: :test, override: true}
     ]
   end
 
@@ -90,48 +95,32 @@ defmodule Tesla.Mixfile do
       main: "readme",
       source_url: @source_url,
       source_ref: "v#{@version}",
-      extras: ["README.md", "LICENSE"],
+      skip_undefined_reference_warnings_on: [
+        "CHANGELOG.md",
+        "guides/howtos/migrations/v1-macro-migration.md"
+      ],
+      extra_section: "GUIDES",
+      logo: "guides/elixir-tesla-logo.png",
+      extras:
+        [
+          "README.md",
+          LICENSE: [title: "License"]
+          # TODO: add CHANGELOG.md
+          # "CHANGELOG.md": [title: "Changelog"]
+        ] ++ Path.wildcard("guides/**/*.{cheatmd,md}"),
+      groups_for_extras: [
+        Explanations: ~r"/explanations/",
+        Cheatsheets: ~r"/cheatsheets/",
+        "How-To's": ~r"/howtos/"
+      ],
       groups_for_modules: [
         Behaviours: [
           Tesla.Adapter,
           Tesla.Middleware
         ],
-        Adapters: [
-          Tesla.Adapter.Finch,
-          Tesla.Adapter.Gun,
-          Tesla.Adapter.Hackney,
-          Tesla.Adapter.Httpc,
-          Tesla.Adapter.Ibrowse,
-          Tesla.Adapter.Mint
-        ],
-        Middlewares: [
-          Tesla.Middleware.BaseUrl,
-          Tesla.Middleware.BasicAuth,
-          Tesla.Middleware.BearerAuth,
-          Tesla.Middleware.Compression,
-          Tesla.Middleware.CompressRequest,
-          Tesla.Middleware.DecodeFormUrlencoded,
-          Tesla.Middleware.DecodeJson,
-          Tesla.Middleware.DecodeRels,
-          Tesla.Middleware.DecompressResponse,
-          Tesla.Middleware.DigestAuth,
-          Tesla.Middleware.EncodeFormUrlencoded,
-          Tesla.Middleware.EncodeJson,
-          Tesla.Middleware.FollowRedirects,
-          Tesla.Middleware.FormUrlencoded,
-          Tesla.Middleware.Fuse,
-          Tesla.Middleware.Headers,
-          Tesla.Middleware.JSON,
-          Tesla.Middleware.KeepRequest,
-          Tesla.Middleware.Logger,
-          Tesla.Middleware.MethodOverride,
-          Tesla.Middleware.Opts,
-          Tesla.Middleware.PathParams,
-          Tesla.Middleware.Query,
-          Tesla.Middleware.Retry,
-          Tesla.Middleware.Telemetry,
-          Tesla.Middleware.Timeout
-        ]
+        Adapters: [~r/Tesla.Adapter./],
+        Middlewares: [~r/Tesla.Middleware./],
+        TestSupport: [~r/Tesla.TestSupport./]
       ],
       nest_modules_by_prefix: [
         Tesla.Adapter,

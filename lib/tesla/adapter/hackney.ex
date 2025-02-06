@@ -6,24 +6,28 @@ if Code.ensure_loaded?(:hackney) do
     Remember to add `{:hackney, "~> 1.13"}` to dependencies (and `:hackney` to applications in `mix.exs`)
     Also, you need to recompile tesla after adding `:hackney` dependency:
 
-    ```
+    ```shell
     mix deps.clean tesla
     mix deps.compile tesla
     ```
 
     ## Examples
 
-    ```
+    ```elixir
     # set globally in config/config.exs
     config :tesla, :adapter, Tesla.Adapter.Hackney
 
     # set per module
     defmodule MyClient do
-      use Tesla
-
-      adapter Tesla.Adapter.Hackney
+      def client do
+        Tesla.client([], Tesla.Adapter.Hackney)
+      end
     end
     ```
+
+    ## Adapter specific options
+
+    - `:max_body` - Max response body size in bytes. Actual response may be bigger because hackney stops after the last chunk that surpasses `:max_body`.
     """
     @behaviour Tesla.Adapter
     alias Tesla.Multipart
@@ -47,7 +51,7 @@ if Code.ensure_loaded?(:hackney) do
     defp request(env, opts) do
       request(
         env.method,
-        Tesla.build_url(env.url, env.query),
+        Tesla.build_url(env),
         env.headers,
         env.body,
         Tesla.Adapter.opts(env, opts)
@@ -68,17 +72,17 @@ if Code.ensure_loaded?(:hackney) do
     end
 
     defp request(method, url, headers, body, opts) do
-      handle(:hackney.request(method, url, headers, body || '', opts))
+      handle(:hackney.request(method, url, headers, body || ~c"", opts), opts)
     end
 
     defp request_stream(method, url, headers, body, opts) do
       with {:ok, ref} <- :hackney.request(method, url, headers, :stream, opts) do
         case send_stream(ref, body) do
-          :ok -> handle(:hackney.start_response(ref))
-          error -> handle(error)
+          :ok -> handle(:hackney.start_response(ref), opts)
+          error -> handle(error, opts)
         end
       else
-        e -> handle(e)
+        e -> handle(e, opts)
       end
     end
 
@@ -91,20 +95,20 @@ if Code.ensure_loaded?(:hackney) do
       end)
     end
 
-    defp handle({:error, _} = error), do: error
-    defp handle({:ok, status, headers}), do: {:ok, status, headers, []}
+    defp handle({:error, _} = error, _opts), do: error
+    defp handle({:ok, status, headers}, _opts), do: {:ok, status, headers, []}
 
-    defp handle({:ok, ref}) when is_reference(ref) do
+    defp handle({:ok, ref}, _opts) when is_reference(ref) do
       handle_async_response({ref, %{status: nil, headers: nil}})
     end
 
-    defp handle({:ok, status, headers, ref}) when is_reference(ref) do
-      with {:ok, body} <- :hackney.body(ref) do
+    defp handle({:ok, status, headers, ref}, opts) when is_reference(ref) do
+      with {:ok, body} <- :hackney.body(ref, Keyword.get(opts, :max_body, :infinity)) do
         {:ok, status, headers, body}
       end
     end
 
-    defp handle({:ok, status, headers, body}), do: {:ok, status, headers, body}
+    defp handle({:ok, status, headers, body}, _opts), do: {:ok, status, headers, body}
 
     defp handle_async_response({ref, %{headers: headers, status: status}})
          when not (is_nil(headers) or is_nil(status)) do

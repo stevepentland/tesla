@@ -7,11 +7,11 @@ defmodule Tesla.Middleware.MethodOverride do
 
   ## Examples
 
-  ```
+  ```elixir
   defmodule MyClient do
-    use Tesla
-
-    plug Tesla.Middleware.MethodOverride
+    def client do
+      Tesla.client([Tesla.Middleware.MethodOverride])
+    end
   end
   ```
 
@@ -44,7 +44,7 @@ defmodule Tesla.Middleware.MethodOverride do
     if opts[:override] do
       env.method in opts[:override]
     else
-      not (env.method in [:get, :post])
+      env.method not in [:get, :post]
     end
   end
 end

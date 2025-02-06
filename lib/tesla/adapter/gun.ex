@@ -8,21 +8,22 @@ if Code.ensure_loaded?(:gun) do
     In version 1.3 gun sends `host` header with port. Fixed in master branch.
     Also, you need to recompile tesla after adding `:gun` dependency:
 
-    ```
+    ```shell
     mix deps.clean tesla
     mix deps.compile tesla
     ```
 
     ## Examples
 
-    ```
+    ```elixir
     # set globally in config/config.exs
     config :tesla, :adapter, Tesla.Adapter.Gun
 
     # set per module
     defmodule MyClient do
-      use Tesla
-      adapter Tesla.Adapter.Gun
+      def client do
+        Tesla.client([], Tesla.Adapter.Gun)
+      end
     end
     ```
 
@@ -55,7 +56,7 @@ if Code.ensure_loaded?(:gun) do
         [ssl_verify_fun.erl](https://github.com/deadtrickster/ssl_verify_fun.erl)
 
     - `:proxy` - Proxy for requests.
-        **Socks proxy are supported only for gun master branch**.
+        **Socks proxy are supported from gun >= 2.0**.
         Examples: `{'localhost', 1234}`, `{{127, 0, 0, 1}, 1234}`, `{:socks5, 'localhost', 1234}`.
 
       **NOTE:** By default GUN uses TLS as transport if the specified port is 443,
@@ -178,7 +179,7 @@ if Code.ensure_loaded?(:gun) do
     defp request(env, opts) do
       request(
         Tesla.Adapter.Shared.format_method(env.method),
-        Tesla.build_url(env.url, env.query),
+        Tesla.build_url(env),
         format_headers(env.headers),
         env.body || "",
         Tesla.Adapter.opts(
@@ -278,7 +279,7 @@ if Code.ensure_loaded?(:gun) do
     defp maybe_add_transport(%URI{scheme: "https"}, opts), do: Map.put(opts, :transport, :tls)
     defp maybe_add_transport(_, opts), do: opts
 
-    # Support for gun master branch where transport_opts, were splitted to tls_opts and tcp_opts
+    # Support for gun master branch where transport_opts, were split to tls_opts and tcp_opts
     # https://github.com/ninenines/gun/blob/491ddf58c0e14824a741852fdc522b390b306ae2/doc/src/manual/gun.asciidoc#changelog
     # TODO: remove after update to gun 2.0
     defp fetch_tls_opts(%{tls_opts: tls_opts}) when is_list(tls_opts), do: tls_opts
@@ -435,7 +436,7 @@ if Code.ensure_loaded?(:gun) do
     end
 
     defp open_stream(pid, method, path, headers, body, req_opts, :stream) do
-      stream = :gun.request(pid, method, path, headers, "", req_opts)
+      stream = perform_stream_request(pid, method, path, headers, req_opts)
       for data <- body, do: :ok = :gun.data(pid, stream, :nofin, data)
       :gun.data(pid, stream, :fin, "")
       stream
@@ -551,6 +552,17 @@ if Code.ensure_loaded?(:gun) do
 
         {:ok, ip} ->
           ip
+      end
+    end
+
+    # Backwards compatibility with gun < 2.0. See https://ninenines.eu/docs/en/gun/2.0/manual/gun.headers/
+    if Application.spec(:gun, :vsn) |> List.to_string() |> Version.match?("~> 2.0") do
+      defp perform_stream_request(pid, method, path, headers, req_opts) do
+        :gun.headers(pid, method, path, headers, req_opts)
+      end
+    else
+      defp perform_stream_request(pid, method, path, headers, req_opts) do
+        :gun.request(pid, method, path, headers, "", req_opts)
       end
     end
   end
